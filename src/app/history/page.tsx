@@ -7,17 +7,43 @@ import {
   getDateKey,
   sumSessions,
   formatDisplayDate,
+  listAvailableDates,
+  getOverallAverage,
 } from "@/lib/storage";
 
 export default function HistoryPage() {
-  const [selected, setSelected] = useState<string>(() => getDateKey(new Date()));
+  const [selected, setSelected] = useState<string>("");
+  const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [sessions, setSessions] = useState<number[]>([]);
+  const [overallAvg, setOverallAvg] = useState<number>(0);
+
+  // 初回: 記録がある日付一覧を取得
+  useEffect(() => {
+    (async () => {
+      const avg = await getOverallAverage();
+      setOverallAvg(avg);
+      const dates = await listAvailableDates();
+      setAvailableDates(dates);
+      if (dates.length > 0) {
+        const today = getDateKey(new Date());
+        setSelected(dates.includes(today) ? today : dates[0]);
+      } else {
+        setSelected("");
+        setSessions([]);
+      }
+    })();
+  }, []);
 
   useEffect(() => {
-    setSessions(getSessions(selected));
+    if (!selected) return;
+    (async () => {
+      const s = await getSessions(selected);
+      setSessions(s);
+    })();
   }, [selected]);
 
   const total = useMemo(() => sumSessions(sessions), [sessions]);
+  const dayAvg = useMemo(() => (sessions.length ? Math.round(total / sessions.length) : 0), [sessions, total]);
 
   return (
     <div className="min-h-[100dvh] flex flex-col bg-black text-zinc-100">
@@ -28,27 +54,43 @@ export default function HistoryPage() {
 
       <main className="flex-1 px-5 pb-28">
         <section className="mt-4">
-          <label className="block text-sm text-zinc-300 mb-2">日付を選択</label>
-          <input
-            type="date"
-            className="w-full rounded-lg bg-zinc-900/70 border border-zinc-800 px-4 py-3 text-zinc-100"
-            value={selected}
-            onChange={(e) => setSelected(e.target.value)}
-          />
+          <label className="block text-sm text-zinc-300 mb-2">記録がある日付</label>
+          {availableDates.length === 0 ? (
+            <div className="text-zinc-500 text-sm">まだ記録がありません</div>
+          ) : (
+            <select
+              className="w-full rounded-lg bg-zinc-900/70 border border-zinc-800 px-4 py-3 text-zinc-100"
+              value={selected}
+              onChange={(e) => setSelected(e.target.value)}
+            >
+              {availableDates.map((d) => (
+                <option key={d} value={d}>
+                  {formatDisplayDate(d)}
+                </option>
+              ))}
+            </select>
+          )}
         </section>
 
         <section className="mt-6 text-center">
-          <div className="text-[12px] text-zinc-400">{formatDisplayDate(selected)} の合計</div>
+          <div className="text-[12px] text-zinc-400">{selected ? `${formatDisplayDate(selected)} の合計` : "選択してください"}</div>
           <div className="mt-1 text-5xl font-bold tracking-tight">
             {total}
             <span className="ml-2 text-xl font-medium text-zinc-400">分</span>
           </div>
+          {selected && (
+            <div className="mt-2 text-sm text-zinc-400">
+              1回平均: {dayAvg} 分
+              <span className="mx-2">/</span>
+              全体平均: {overallAvg} 分
+            </div>
+          )}
         </section>
 
         <section className="mt-7">
           <h2 className="text-sm text-zinc-300 mb-3">内訳</h2>
           <ul className="space-y-2">
-            {sessions.length === 0 && (
+            {selected && sessions.length === 0 && (
               <li className="text-zinc-500 text-sm">この日の記録はありません</li>
             )}
             {sessions.map((m, i) => (
@@ -76,4 +118,3 @@ export default function HistoryPage() {
     </div>
   );
 }
-

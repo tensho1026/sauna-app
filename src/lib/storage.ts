@@ -1,8 +1,13 @@
 "use client";
 
-export type SessionsMap = Record<string, number[]>;
-
-const STORAGE_KEY = "sauna-log";
+import {
+  addSession as addSessionAction,
+  getSessionsByDate,
+  removeSession as removeSessionAction,
+  setSessions as setSessionsAction,
+  listDatesWithSessions,
+  getOverallAverage as getOverallAverageAction,
+} from "@/app/actions/saunaSessions";
 
 export function getDateKey(date: Date = new Date()): string {
   const y = date.getFullYear();
@@ -11,60 +16,28 @@ export function getDateKey(date: Date = new Date()): string {
   return `${y}-${m}-${d}`;
 }
 
-function readAll(): SessionsMap {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const data = JSON.parse(raw);
-    if (typeof data !== "object" || data === null) return {};
-    return data as SessionsMap;
-  } catch (_) {
-    return {};
-  }
+export async function getSessions(dateKey: string): Promise<number[]> {
+  return await getSessionsByDate(dateKey);
 }
 
-function writeAll(map: SessionsMap) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
+export async function setSessions(dateKey: string, sessions: number[]): Promise<void> {
+  await setSessionsAction(dateKey, sessions);
 }
 
-export function getSessions(dateKey: string): number[] {
-  const map = readAll();
-  const arr = map[dateKey];
-  if (!Array.isArray(arr)) return [];
-  return arr.filter((n) => typeof n === "number" && !isNaN(n) && n > 0);
+export async function addSession(dateKey: string, minutes: number): Promise<void> {
+  await addSessionAction(dateKey, minutes);
 }
 
-export function setSessions(dateKey: string, sessions: number[]) {
-  const map = readAll();
-  map[dateKey] = sessions.filter((n) => typeof n === "number" && !isNaN(n) && n > 0);
-  writeAll(map);
+export async function removeSession(dateKey: string, index: number): Promise<void> {
+  await removeSessionAction(dateKey, index);
 }
 
-export function addSession(dateKey: string, minutes: number) {
-  if (!minutes || isNaN(minutes) || minutes <= 0) return;
-  const map = readAll();
-  const arr = Array.isArray(map[dateKey]) ? map[dateKey] : [];
-  arr.push(Math.round(minutes));
-  map[dateKey] = arr;
-  writeAll(map);
+export async function listAvailableDates(): Promise<string[]> {
+  return await listDatesWithSessions();
 }
 
-export function removeSession(dateKey: string, index: number) {
-  const map = readAll();
-  const arr = Array.isArray(map[dateKey]) ? map[dateKey] : [];
-  if (index >= 0 && index < arr.length) {
-    arr.splice(index, 1);
-    map[dateKey] = arr;
-    writeAll(map);
-  }
-}
-
-export function clearDate(dateKey: string) {
-  const map = readAll();
-  delete map[dateKey];
-  writeAll(map);
+export async function getOverallAverage(): Promise<number> {
+  return await getOverallAverageAction();
 }
 
 export function sumSessions(sessions: number[]): number {
@@ -75,4 +48,3 @@ export function formatDisplayDate(dateKey: string): string {
   const [y, m, d] = dateKey.split("-");
   return `${y}年${Number(m)}月${Number(d)}日`;
 }
-

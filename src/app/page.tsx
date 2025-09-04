@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   addSession,
   getDateKey,
@@ -10,45 +10,76 @@ import {
   setSessions,
   sumSessions,
   formatDisplayDate,
+  getOverallAverage,
 } from "@/lib/storage";
+import { useUser } from "@clerk/nextjs";
+import { SaveUser } from "@/hooks/saveuser";
 
 export default function Home() {
   const todayKey = useMemo(() => getDateKey(new Date()), []);
   const [sessions, setLocalSessions] = useState<number[]>([]);
   const [input, setInput] = useState<string>("");
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [overallAvg, setOverallAvg] = useState<number>(0);
+
+  SaveUser();
 
   useEffect(() => {
-    setLocalSessions(getSessions(todayKey));
+    (async () => {
+      const [s, avg] = await Promise.all([
+        getSessions(todayKey),
+        getOverallAverage(),
+      ]);
+      setLocalSessions(s);
+      setOverallAvg(avg);
+    })();
   }, [todayKey]);
 
   const total = useMemo(() => sumSessions(sessions), [sessions]);
 
-  const onAdd = () => {
+  const onAdd = async () => {
     const minutes = Number(input);
     if (!minutes || minutes <= 0 || !Number.isFinite(minutes)) return;
-    addSession(todayKey, minutes);
-    setLocalSessions(getSessions(todayKey));
+    await addSession(todayKey, minutes);
+    const [s, avg] = await Promise.all([
+      getSessions(todayKey),
+      getOverallAverage(),
+    ]);
+    setLocalSessions(s);
+    setOverallAvg(avg);
     setInput("");
   };
 
-  const onDelete = (idx: number) => {
-    removeSession(todayKey, idx);
-    setLocalSessions(getSessions(todayKey));
+  const onDelete = async (idx: number) => {
+    await removeSession(todayKey, idx);
+    const [s, avg] = await Promise.all([
+      getSessions(todayKey),
+      getOverallAverage(),
+    ]);
+    setLocalSessions(s);
+    setOverallAvg(avg);
   };
 
-  const onReorderOrEdit = (idx: number, value: string) => {
+  const onReorderOrEdit = async (idx: number, value: string) => {
     const n = Number(value);
     if (!n || n <= 0 || !Number.isFinite(n)) return;
     const next = [...sessions];
     next[idx] = Math.round(n);
     setLocalSessions(next);
-    setSessions(todayKey, next);
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      await setSessions(todayKey, next);
+      const avg = await getOverallAverage();
+      setOverallAvg(avg);
+    }, 500);
   };
 
   return (
     <div className="min-h-[100dvh] flex flex-col bg-black text-zinc-100">
       <header className="px-5 pt-6 pb-2">
-        <div className="text-xs text-zinc-400">{formatDisplayDate(todayKey)}</div>
+        <div className="text-xs text-zinc-400">
+          {formatDisplayDate(todayKey)}
+        </div>
         <h1 className="text-lg font-semibold tracking-wide">サウナ記録</h1>
       </header>
 
@@ -58,6 +89,11 @@ export default function Home() {
           <div className="mt-1 text-6xl font-bold tracking-tight">
             {total}
             <span className="ml-2 text-xl font-medium text-zinc-400">分</span>
+          </div>
+          <div className="mt-2 text-sm text-zinc-400">
+            1回平均: {sessions.length ? Math.round(total / sessions.length) : 0} 分
+            <span className="mx-2">/</span>
+            全体平均: {overallAvg} 分
           </div>
         </section>
 
@@ -72,9 +108,7 @@ export default function Home() {
                 key={i}
                 className="flex items-center justify-between rounded-lg bg-zinc-900/70 border border-zinc-800 px-4 py-3"
               >
-                <div className="text-zinc-200 text-base">
-                  {i + 1}回目
-                </div>
+                <div className="text-zinc-200 text-base">{i + 1}回目</div>
                 <div className="flex items-center gap-3">
                   <input
                     type="number"
@@ -117,7 +151,9 @@ export default function Home() {
               追加
             </button>
           </div>
-          <div className="mt-2 text-xs text-zinc-500">入力後「追加」で保存されます（自動保存）</div>
+          <div className="mt-2 text-xs text-zinc-500">
+            入力後「追加」で保存されます（自動保存）
+          </div>
         </section>
       </main>
 
@@ -126,8 +162,12 @@ export default function Home() {
         style={{ paddingBottom: "max(env(safe-area-inset-bottom), 8px)" }}
       >
         <div className="mx-auto max-w-md px-6 py-3 flex items-center justify-around text-sm">
-          <Link href="/" className="text-zinc-100 font-semibold">ホーム</Link>
-          <Link href="/history" className="text-zinc-400 hover:text-zinc-100">履歴</Link>
+          <Link href="/" className="text-zinc-100 font-semibold">
+            ホーム
+          </Link>
+          <Link href="/history" className="text-zinc-400 hover:text-zinc-100">
+            履歴
+          </Link>
         </div>
       </nav>
     </div>
