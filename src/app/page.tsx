@@ -12,7 +12,6 @@ import {
   formatDisplayDate,
   getOverallAverage,
 } from "@/lib/storage";
-import { useUser } from "@clerk/nextjs";
 import { SaveUser } from "@/hooks/saveuser";
 
 export default function Home() {
@@ -36,6 +35,10 @@ export default function Home() {
   }, [todayKey]);
 
   const total = useMemo(() => sumSessions(sessions), [sessions]);
+  const dayAvg = useMemo(
+    () => (sessions.length ? total / sessions.length : 0),
+    [sessions, total]
+  );
 
   const onAdd = async () => {
     const minutes = Number(input);
@@ -91,9 +94,9 @@ export default function Home() {
             <span className="ml-2 text-xl font-medium text-zinc-400">分</span>
           </div>
           <div className="mt-2 text-sm text-zinc-400">
-            1回平均: {sessions.length ? Math.round(total / sessions.length) : 0} 分
+            1回平均: {dayAvg.toFixed(1)} 分
             <span className="mx-2">/</span>
-            全体平均: {overallAvg} 分
+            全体平均: {overallAvg.toFixed(1)} 分
           </div>
         </section>
 

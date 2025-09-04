@@ -43,7 +43,7 @@ export default function HistoryPage() {
   }, [selected]);
 
   const total = useMemo(() => sumSessions(sessions), [sessions]);
-  const dayAvg = useMemo(() => (sessions.length ? Math.round(total / sessions.length) : 0), [sessions, total]);
+  const dayAvg = useMemo(() => (sessions.length ? total / sessions.length : 0), [sessions, total]);
 
   return (
     <div className="min-h-[100dvh] flex flex-col bg-black text-zinc-100">
@@ -80,9 +80,9 @@ export default function HistoryPage() {
           </div>
           {selected && (
             <div className="mt-2 text-sm text-zinc-400">
-              1回平均: {dayAvg} 分
+              1回平均: {dayAvg.toFixed(1)} 分
               <span className="mx-2">/</span>
-              全体平均: {overallAvg} 分
+              全体平均: {overallAvg.toFixed(1)} 分
             </div>
           )}
         </section>

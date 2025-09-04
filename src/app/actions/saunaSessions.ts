@@ -37,7 +37,7 @@ export async function getOverallAverage(): Promise<number> {
     const cnt = rows[0]?.cnt ?? 0;
     const total = rows[0]?.total ?? 0;
     if (!cnt || cnt <= 0) return 0;
-    return Math.round(total / cnt);
+    return total / cnt;
   } finally {
     client.release();
   }
