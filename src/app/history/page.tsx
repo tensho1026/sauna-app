@@ -7,8 +7,10 @@ import {
   getDateKey,
   sumSessions,
   formatDisplayDate,
-  listAvailableDates,
+  listAvailableDatesByFacility,
+  listFacilities,
   getOverallAverage,
+  getDayMeta,
 } from "@/lib/storage";
 
 export default function HistoryPage() {
@@ -16,13 +18,19 @@ export default function HistoryPage() {
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [sessions, setSessions] = useState<number[]>([]);
   const [overallAvg, setOverallAvg] = useState<number>(0);
+  const [facilities, setFacilities] = useState<string[]>([]);
+  const [facilityFilter, setFacilityFilter] = useState<string>("");
+  const [facilityName, setFacilityName] = useState<string>("");
+  const [conditionRating, setConditionRating] = useState<number | null>(null);
+  const [satisfactionRating, setSatisfactionRating] = useState<number | null>(null);
 
   // 初回: 記録がある日付一覧を取得
   useEffect(() => {
     (async () => {
-      const avg = await getOverallAverage();
+      const [avg, facs] = await Promise.all([getOverallAverage(), listFacilities()]);
       setOverallAvg(avg);
-      const dates = await listAvailableDates();
+      setFacilities(facs);
+      const dates = await listAvailableDatesByFacility("");
       setAvailableDates(dates);
       if (dates.length > 0) {
         const today = getDateKey(new Date());
@@ -34,11 +42,27 @@ export default function HistoryPage() {
     })();
   }, []);
 
+  // 施設フィルタの変更で日付一覧を更新
+  useEffect(() => {
+    (async () => {
+      const dates = await listAvailableDatesByFacility(facilityFilter || undefined);
+      setAvailableDates(dates);
+      if (!dates.includes(selected)) {
+        setSelected(dates[0] ?? "");
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [facilityFilter]);
+
   useEffect(() => {
     if (!selected) return;
     (async () => {
       const s = await getSessions(selected);
       setSessions(s);
+      const meta = await getDayMeta(selected);
+      setFacilityName(meta.facilityName ?? "");
+      setConditionRating(meta.conditionRating ?? null);
+      setSatisfactionRating(meta.satisfactionRating ?? null);
     })();
   }, [selected]);
 
@@ -53,6 +77,21 @@ export default function HistoryPage() {
       </header>
 
       <main className="flex-1 px-5 pb-28">
+        <section className="mt-4">
+          <label className="block text-sm text-zinc-300 mb-2">施設で絞り込み</label>
+          <select
+            className="w-full rounded-lg bg-zinc-900/70 border border-zinc-800 px-4 py-3 text-zinc-100"
+            value={facilityFilter}
+            onChange={(e) => setFacilityFilter(e.target.value)}
+          >
+            <option value="">すべて</option>
+            {facilities.map((f) => (
+              <option key={f} value={f}>
+                {f}
+              </option>
+            ))}
+          </select>
+        </section>
         <section className="mt-4">
           <label className="block text-sm text-zinc-300 mb-2">記録がある日付</label>
           {availableDates.length === 0 ? (
@@ -86,6 +125,27 @@ export default function HistoryPage() {
             </div>
           )}
         </section>
+
+        {selected && (
+          <section className="mt-6 grid grid-cols-1 gap-2 rounded-xl bg-zinc-900/50 border border-zinc-800 p-4 text-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-zinc-300">施設名</span>
+              <span className="text-zinc-100">{facilityName || "-"}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-zinc-300">その日の体調</span>
+              <span className="text-yellow-400">
+                {Array.from({ length: 5 }, (_, i) => (conditionRating && i < conditionRating ? "★" : "☆")).join("")}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-zinc-300">その日の満足度</span>
+              <span className="text-yellow-400">
+                {Array.from({ length: 5 }, (_, i) => (satisfactionRating && i < satisfactionRating ? "★" : "☆")).join("")}
+              </span>
+            </div>
+          </section>
+        )}
 
         <section className="mt-7">
           <h2 className="text-sm text-zinc-300 mb-3">内訳</h2>
