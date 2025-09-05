@@ -8,24 +8,59 @@ import {
   setSessions,
   sumSessions,
   getOverallAverage,
+  setDayMeta,
 } from "@/lib/storage";
+import type { DayMeta } from "@/lib/storage";
 
 type Props = {
   dateKey: string;
   initialSessions: number[];
   initialOverallAvg: number;
+  initialMeta: DayMeta;
 };
 
-export default function TodaySessions({ dateKey, initialSessions, initialOverallAvg }: Props) {
+function Stars({ value, onChange }: { value: number | null; onChange: (v: number | null) => void }) {
+  const stars = [1, 2, 3, 4, 5];
+  return (
+    <div className="flex items-center gap-1">
+      {stars.map((s) => (
+        <button
+          key={s}
+          type="button"
+          onClick={() => onChange(value === s ? null : s)}
+          className={"text-xl " + (value && value >= s ? "text-yellow-400" : "text-zinc-600 hover:text-zinc-400")}
+          aria-label={`${s} 星`}
+        >
+          {value && value >= s ? "★" : "☆"}
+        </button>
+      ))}
+      {value !== null && (
+        <button className="ml-2 text-xs text-zinc-500 hover:text-zinc-300" onClick={() => onChange(null)}>
+          クリア
+        </button>
+      )}
+    </div>
+  );
+}
+
+export default function TodaySessions({ dateKey, initialSessions, initialOverallAvg, initialMeta }: Props) {
   const [sessions, setLocalSessions] = useState<number[]>(initialSessions);
   const [input, setInput] = useState<string>("");
   const [overallAvg, setOverallAvg] = useState<number>(initialOverallAvg);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const metaTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [facilityName, setFacilityName] = useState<string>(initialMeta?.facilityName ?? "");
+  const [conditionRating, setConditionRating] = useState<number | null>(initialMeta?.conditionRating ?? null);
+  const [satisfactionRating, setSatisfactionRating] = useState<number | null>(initialMeta?.satisfactionRating ?? null);
 
   useEffect(() => {
     setLocalSessions(initialSessions);
     setOverallAvg(initialOverallAvg);
-  }, [initialSessions, initialOverallAvg]);
+    setFacilityName(initialMeta?.facilityName ?? "");
+    setConditionRating(initialMeta?.conditionRating ?? null);
+    setSatisfactionRating(initialMeta?.satisfactionRating ?? null);
+  }, [initialSessions, initialOverallAvg, initialMeta]);
 
   const total = useMemo(() => sumSessions(sessions), [sessions]);
   const dayAvg = useMemo(() => (sessions.length ? total / sessions.length : 0), [sessions, total]);
@@ -37,7 +72,11 @@ export default function TodaySessions({ dateKey, initialSessions, initialOverall
     // Optimistic update
     setLocalSessions((prev) => [...prev, rounded]);
     setInput("");
-    await addSession(dateKey, rounded);
+    await addSession(dateKey, rounded, {
+      facilityName: facilityName || null,
+      conditionRating,
+      satisfactionRating,
+    });
     const avg = await getOverallAverage();
     setOverallAvg(avg);
   };
@@ -64,8 +103,60 @@ export default function TodaySessions({ dateKey, initialSessions, initialOverall
     }, 500);
   };
 
+  const saveMeta = () => {
+    if (metaTimer.current) clearTimeout(metaTimer.current);
+    // セッションが1件以上あるときのみ即時保存（0件なら追加時に保存される）
+    metaTimer.current = setTimeout(async () => {
+      if (sessions.length > 0) {
+        await setDayMeta(dateKey, {
+          facilityName: facilityName || null,
+          conditionRating,
+          satisfactionRating,
+        });
+      }
+    }, 400);
+  };
+
   return (
     <>
+      <section className="mt-4 space-y-3 bg-zinc-900/50 border border-zinc-800 rounded-xl p-4">
+        <div>
+          <label className="block text-sm text-zinc-300 mb-1">施設名</label>
+          <input
+            type="text"
+            placeholder="例: ○○サウナ"
+            className="w-full bg-transparent text-zinc-100 placeholder:text-zinc-500 outline-none border-b border-zinc-700 focus:border-zinc-400"
+            value={facilityName}
+            onChange={(e) => {
+              setFacilityName(e.target.value);
+              saveMeta();
+            }}
+          />
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-zinc-300">その日の体調</span>
+          <Stars
+            value={conditionRating}
+            onChange={(v) => {
+              setConditionRating(v);
+              saveMeta();
+            }}
+          />
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-zinc-300">その日の満足度</span>
+          <Stars
+            value={satisfactionRating}
+            onChange={(v) => {
+              setSatisfactionRating(v);
+              saveMeta();
+            }}
+          />
+        </div>
+        {sessions.length === 0 && (
+          <div className="text-xs text-zinc-500">最初のセッション追加時に保存されます</div>
+        )}
+      </section>
       <section className="mt-2 text-center">
         <div className="text-[12px] text-zinc-400">今日の合計</div>
         <div className="mt-1 text-6xl font-bold tracking-tight">
@@ -140,4 +231,3 @@ export default function TodaySessions({ dateKey, initialSessions, initialOverall
     </>
   );
 }
-

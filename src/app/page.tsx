@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { currentUser } from "@clerk/nextjs/server";
 import { getDateKey, formatDisplayDate } from "@/lib/date";
-import { getSessionsByDate, getOverallAverage } from "@/app/actions/saunaSessions";
+import { getSessionsByDate, getOverallAverage, getDayMeta } from "@/app/actions/saunaSessions";
 import TodaySessions from "@/components/TodaySessions";
 import { saveUserToDatabase } from "@/app/actions/saveUser";
 
@@ -14,9 +14,10 @@ export default async function Home() {
   }
 
   const todayKey = getDateKey(new Date());
-  const [initialSessions, initialOverallAvg] = await Promise.all([
+  const [initialSessions, initialOverallAvg, initialMeta] = await Promise.all([
     getSessionsByDate(todayKey),
     getOverallAverage(),
+    getDayMeta(todayKey),
   ]);
 
   return (
@@ -31,6 +32,7 @@ export default async function Home() {
           dateKey={todayKey}
           initialSessions={initialSessions}
           initialOverallAvg={initialOverallAvg}
+          initialMeta={initialMeta}
         />
       </main>
 

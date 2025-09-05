@@ -23,6 +23,21 @@ export type SessionRow = {
   created_at: string | null;
 };
 
+export type DayMeta = {
+  facilityName: string | null;
+  conditionRating: number | null; // 1-5 or null
+  satisfactionRating: number | null; // 1-5 or null
+};
+
+function clampRating(n: unknown): number | null {
+  if (n === null || n === undefined || n === "") return null;
+  const v = Number(n);
+  if (!Number.isFinite(v)) return null;
+  const i = Math.floor(v);
+  if (i < 1 || i > 5) return null;
+  return i;
+}
+
 // 全体の1回平均（分）を返す
 export async function getOverallAverage(): Promise<number> {
   const userId = await assertAuthed();
@@ -61,6 +76,63 @@ export async function listDatesWithSessions(): Promise<string[]> {
   }
 }
 
+// 指定日のメタ情報（施設名/体調/満足度）
+export async function getDayMeta(dateKey: string): Promise<DayMeta> {
+  const userId = await assertAuthed();
+  if (!isValidDateKey(dateKey)) throw new Error("Invalid date");
+
+  const client = await pool.connect();
+  try {
+    const { rows } = await client.query<{
+      facility_name: string | null;
+      condition_rating: number | null;
+      satisfaction_rating: number | null;
+    }>(
+      `SELECT facility_name, condition_rating, satisfaction_rating
+       FROM sauna_sessions
+       WHERE user_id = $1 AND date = $2
+       ORDER BY session_order ASC
+       LIMIT 1`,
+      [userId, dateKey]
+    );
+    const r = rows[0];
+    return {
+      facilityName: r?.facility_name ?? null,
+      conditionRating: r?.condition_rating ?? null,
+      satisfactionRating: r?.satisfaction_rating ?? null,
+    };
+  } finally {
+    client.release();
+  }
+}
+
+// 指定日のメタ情報を全レコードに反映（既存行のみ）
+export async function setDayMeta(
+  dateKey: string,
+  meta: Partial<DayMeta>
+): Promise<void> {
+  const userId = await assertAuthed();
+  if (!isValidDateKey(dateKey)) throw new Error("Invalid date");
+
+  const facilityName = (meta.facilityName ?? null) as string | null;
+  const conditionRating = clampRating(meta.conditionRating);
+  const satisfactionRating = clampRating(meta.satisfactionRating);
+
+  const client = await pool.connect();
+  try {
+    await client.query(
+      `UPDATE sauna_sessions
+       SET facility_name = $3,
+           condition_rating = $4,
+           satisfaction_rating = $5
+       WHERE user_id = $1 AND date = $2`,
+      [userId, dateKey, facilityName, conditionRating, satisfactionRating]
+    );
+  } finally {
+    client.release();
+  }
+}
+
 // 取得: 指定日のセッション（session_order 昇順）
 export async function getSessionsByDate(dateKey: string): Promise<number[]> {
   const userId = await assertAuthed();
@@ -82,7 +154,11 @@ export async function getSessionsByDate(dateKey: string): Promise<number[]> {
 }
 
 // 追加: 指定日の最後に 1 件追加（session_order = MAX+1）
-export async function addSession(dateKey: string, minutes: number): Promise<void> {
+export async function addSession(
+  dateKey: string,
+  minutes: number,
+  meta?: Partial<DayMeta>
+): Promise<void> {
   const userId = await assertAuthed();
   if (!isValidDateKey(dateKey)) throw new Error("Invalid date");
   const n = Math.round(Number(minutes));
@@ -98,10 +174,36 @@ export async function addSession(dateKey: string, minutes: number): Promise<void
       [userId, dateKey]
     );
     const nextOrder = (rows[0]?.max ?? 0) + 1;
+    // 既存メタ（先頭行）を取得
+    let existing: DayMeta = { facilityName: null, conditionRating: null, satisfactionRating: null };
+    if (nextOrder > 1) {
+      const metaRows = await client.query<{
+        facility_name: string | null;
+        condition_rating: number | null;
+        satisfaction_rating: number | null;
+      }>(
+        `SELECT facility_name, condition_rating, satisfaction_rating
+         FROM sauna_sessions
+         WHERE user_id = $1 AND date = $2
+         ORDER BY session_order ASC
+         LIMIT 1`,
+        [userId, dateKey]
+      );
+      const r = metaRows.rows[0];
+      existing = {
+        facilityName: r?.facility_name ?? null,
+        conditionRating: r?.condition_rating ?? null,
+        satisfactionRating: r?.satisfaction_rating ?? null,
+      };
+    }
+    const facilityName = (meta?.facilityName ?? existing.facilityName ?? null) as string | null;
+    const conditionRating = clampRating(meta?.conditionRating ?? existing.conditionRating);
+    const satisfactionRating = clampRating(meta?.satisfactionRating ?? existing.satisfactionRating);
+
     await client.query(
-      `INSERT INTO sauna_sessions (user_id, date, session_order, minutes)
-       VALUES ($1, $2, $3, $4)`,
-      [userId, dateKey, nextOrder, n]
+      `INSERT INTO sauna_sessions (user_id, date, session_order, minutes, facility_name, condition_rating, satisfaction_rating)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [userId, dateKey, nextOrder, n, facilityName, conditionRating, satisfactionRating]
     );
     await client.query("COMMIT");
   } catch (e) {
@@ -153,6 +255,23 @@ export async function setSessions(dateKey: string, minutesArray: number[]): Prom
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    // 既存メタを取得
+    const metaRows = await client.query<{
+      facility_name: string | null;
+      condition_rating: number | null;
+      satisfaction_rating: number | null;
+    }>(
+      `SELECT facility_name, condition_rating, satisfaction_rating
+       FROM sauna_sessions
+       WHERE user_id = $1 AND date = $2
+       ORDER BY session_order ASC
+       LIMIT 1`,
+      [userId, dateKey]
+    );
+    const existingFacility = metaRows.rows[0]?.facility_name ?? null;
+    const existingCond = metaRows.rows[0]?.condition_rating ?? null;
+    const existingSat = metaRows.rows[0]?.satisfaction_rating ?? null;
+
     // いったん全削除
     await client.query(
       `DELETE FROM sauna_sessions WHERE user_id = $1 AND date = $2`,
@@ -161,15 +280,71 @@ export async function setSessions(dateKey: string, minutesArray: number[]): Prom
     // 挿入（順番は配列順）
     for (let i = 0; i < cleaned.length; i++) {
       await client.query(
-        `INSERT INTO sauna_sessions (user_id, date, session_order, minutes)
-         VALUES ($1, $2, $3, $4)`,
-        [userId, dateKey, i + 1, cleaned[i]]
+        `INSERT INTO sauna_sessions (user_id, date, session_order, minutes, facility_name, condition_rating, satisfaction_rating)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          userId,
+          dateKey,
+          i + 1,
+          cleaned[i],
+          existingFacility,
+          clampRating(existingCond),
+          clampRating(existingSat),
+        ]
       );
     }
     await client.query("COMMIT");
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;
+  } finally {
+    client.release();
+  }
+}
+
+// 施設名で日付を絞り込み（未指定なら全件）
+export async function listDatesWithSessionsByFacility(
+  facilityName?: string | null
+): Promise<string[]> {
+  const userId = await assertAuthed();
+  const client = await pool.connect();
+  try {
+    if (facilityName && facilityName.trim() !== "") {
+      const { rows } = await client.query<{ date: string }>(
+        `SELECT DISTINCT date::text AS date
+         FROM sauna_sessions
+         WHERE user_id = $1 AND facility_name = $2
+         ORDER BY date DESC`,
+        [userId, facilityName]
+      );
+      return rows.map((r) => r.date);
+    } else {
+      const { rows } = await client.query<{ date: string }>(
+        `SELECT DISTINCT date::text AS date
+         FROM sauna_sessions
+         WHERE user_id = $1
+         ORDER BY date DESC`,
+        [userId]
+      );
+      return rows.map((r) => r.date);
+    }
+  } finally {
+    client.release();
+  }
+}
+
+// 自分の施設名一覧（最近使用順）
+export async function listFacilities(): Promise<string[]> {
+  const userId = await assertAuthed();
+  const client = await pool.connect();
+  try {
+    const { rows } = await client.query<{ facility_name: string | null }>(
+      `SELECT DISTINCT facility_name
+       FROM sauna_sessions
+       WHERE user_id = $1 AND facility_name IS NOT NULL AND facility_name <> ''`,
+      [userId]
+    );
+    return rows.map((r) => r.facility_name!).filter(Boolean);
   } finally {
     client.release();
   }
