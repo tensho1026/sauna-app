@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { UserButton } from "@clerk/nextjs";
 import { useEffect, useMemo, useState } from "react";
 import {
   getSessions,
@@ -72,8 +73,13 @@ export default function HistoryPage() {
   return (
     <div className="min-h-[100dvh] flex flex-col bg-black text-zinc-100">
       <header className="px-5 pt-6 pb-2">
-        <div className="text-xs text-zinc-400">履歴</div>
-        <h1 className="text-lg font-semibold tracking-wide">日付で検索</h1>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="text-xs text-zinc-400">履歴</div>
+            <h1 className="text-lg font-semibold tracking-wide">日付で検索</h1>
+          </div>
+          <UserButton afterSignOutUrl="/" />
+        </div>
       </header>
 
       <main className="flex-1 px-5 pb-28">
