@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   addSession,
-  getSessions,
   removeSession,
   setSessions,
   sumSessions,
@@ -11,6 +10,7 @@ import {
   setDayMeta,
 } from "@/lib/storage";
 import type { DayMeta } from "@/lib/storage";
+import { StarRating } from "@/components/StarRating";
 
 type Props = {
   dateKey: string;
@@ -19,36 +19,13 @@ type Props = {
   initialMeta: DayMeta;
 };
 
-function Stars({ value, onChange }: { value: number | null; onChange: (v: number | null) => void }) {
-  const stars = [1, 2, 3, 4, 5];
-  return (
-    <div className="flex items-center gap-1">
-      {stars.map((s) => (
-        <button
-          key={s}
-          type="button"
-          onClick={() => onChange(value === s ? null : s)}
-          className={"text-xl " + (value && value >= s ? "text-yellow-400" : "text-zinc-600 hover:text-zinc-400")}
-          aria-label={`${s} 星`}
-        >
-          {value && value >= s ? "★" : "☆"}
-        </button>
-      ))}
-      {value !== null && (
-        <button className="ml-2 text-xs text-zinc-500 hover:text-zinc-300" onClick={() => onChange(null)}>
-          クリア
-        </button>
-      )}
-    </div>
-  );
-}
-
 export default function TodaySessions({ dateKey, initialSessions, initialOverallAvg, initialMeta }: Props) {
   const [sessions, setLocalSessions] = useState<number[]>(initialSessions);
   const [input, setInput] = useState<string>("");
   const [overallAvg, setOverallAvg] = useState<number>(initialOverallAvg);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const metaTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [metaDirty, setMetaDirty] = useState(false);
+  const [metaSaving, setMetaSaving] = useState(false);
 
   const [facilityName, setFacilityName] = useState<string>(initialMeta?.facilityName ?? "");
   const [conditionRating, setConditionRating] = useState<number | null>(initialMeta?.conditionRating ?? null);
@@ -60,7 +37,17 @@ export default function TodaySessions({ dateKey, initialSessions, initialOverall
     setFacilityName(initialMeta?.facilityName ?? "");
     setConditionRating(initialMeta?.conditionRating ?? null);
     setSatisfactionRating(initialMeta?.satisfactionRating ?? null);
+    setMetaDirty(false);
+    setMetaSaving(false);
   }, [initialSessions, initialOverallAvg, initialMeta]);
+
+  useEffect(() => {
+    return () => {
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+      }
+    };
+  }, []);
 
   const total = useMemo(() => sumSessions(sessions), [sessions]);
   const dayAvg = useMemo(() => (sessions.length ? total / sessions.length : 0), [sessions, total]);
@@ -77,6 +64,7 @@ export default function TodaySessions({ dateKey, initialSessions, initialOverall
       conditionRating,
       satisfactionRating,
     });
+    setMetaDirty(false);
     const avg = await getOverallAverage();
     setOverallAvg(avg);
   };
@@ -103,18 +91,19 @@ export default function TodaySessions({ dateKey, initialSessions, initialOverall
     }, 500);
   };
 
-  const saveMeta = () => {
-    if (metaTimer.current) clearTimeout(metaTimer.current);
-    // セッションが1件以上あるときのみ即時保存（0件なら追加時に保存される）
-    metaTimer.current = setTimeout(async () => {
-      if (sessions.length > 0) {
-        await setDayMeta(dateKey, {
-          facilityName: facilityName || null,
-          conditionRating,
-          satisfactionRating,
-        });
-      }
-    }, 400);
+  const saveMeta = async () => {
+    if (metaSaving || !metaDirty) return;
+    setMetaSaving(true);
+    try {
+      await setDayMeta(dateKey, {
+        facilityName: facilityName || null,
+        conditionRating,
+        satisfactionRating,
+      });
+      setMetaDirty(false);
+    } finally {
+      setMetaSaving(false);
+    }
   };
 
   return (
@@ -129,29 +118,39 @@ export default function TodaySessions({ dateKey, initialSessions, initialOverall
             value={facilityName}
             onChange={(e) => {
               setFacilityName(e.target.value);
-              saveMeta();
+              setMetaDirty(true);
             }}
           />
         </div>
         <div className="flex items-center justify-between">
           <span className="text-sm text-zinc-300">その日の体調</span>
-          <Stars
+          <StarRating
             value={conditionRating}
             onChange={(v) => {
               setConditionRating(v);
-              saveMeta();
+              setMetaDirty(true);
             }}
           />
         </div>
         <div className="flex items-center justify-between">
           <span className="text-sm text-zinc-300">その日の満足度</span>
-          <Stars
+          <StarRating
             value={satisfactionRating}
             onChange={(v) => {
               setSatisfactionRating(v);
-              saveMeta();
+              setMetaDirty(true);
             }}
           />
+        </div>
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={saveMeta}
+            disabled={!metaDirty || metaSaving}
+            className="px-4 py-2 rounded-lg bg-zinc-100 text-black font-semibold disabled:opacity-40 disabled:cursor-not-allowed active:opacity-90"
+          >
+            {metaSaving ? "保存中..." : "保存"}
+          </button>
         </div>
         {sessions.length === 0 && (
           <div className="text-xs text-zinc-500">最初のセッション追加時に保存されます</div>
