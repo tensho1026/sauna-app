@@ -12,7 +12,33 @@ import {
   listFacilities,
   getOverallAverage,
   getDayMeta,
+  setSessions as setSessionsAction,
+  setDayMeta,
 } from "@/lib/storage";
+
+function Stars({ value, onChange }: { value: number | null; onChange: (v: number | null) => void }) {
+  const stars = [1, 2, 3, 4, 5];
+  return (
+    <div className="flex items-center gap-1">
+      {stars.map((s) => (
+        <button
+          key={s}
+          type="button"
+          onClick={() => onChange(value === s ? null : s)}
+          className={"text-lg " + (value && value >= s ? "text-yellow-400" : "text-zinc-600 hover:text-zinc-400")}
+          aria-label={`${s} 星`}
+        >
+          {value && value >= s ? "★" : "☆"}
+        </button>
+      ))}
+      {value !== null && (
+        <button className="ml-2 text-xs text-zinc-500 hover:text-zinc-300" onClick={() => onChange(null)}>
+          クリア
+        </button>
+      )}
+    </div>
+  );
+}
 
 export default function HistoryPage() {
   const [selected, setSelected] = useState<string>("");
@@ -24,6 +50,10 @@ export default function HistoryPage() {
   const [facilityName, setFacilityName] = useState<string>("");
   const [conditionRating, setConditionRating] = useState<number | null>(null);
   const [satisfactionRating, setSatisfactionRating] = useState<number | null>(null);
+  const [sessionInput, setSessionInput] = useState<string>("");
+  const [isDirty, setIsDirty] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string>("");
 
   // 初回: 記録がある日付一覧を取得
   useEffect(() => {
@@ -64,11 +94,64 @@ export default function HistoryPage() {
       setFacilityName(meta.facilityName ?? "");
       setConditionRating(meta.conditionRating ?? null);
       setSatisfactionRating(meta.satisfactionRating ?? null);
+      setSessionInput("");
+      setIsDirty(false);
+      setStatusMessage("");
     })();
   }, [selected]);
 
   const total = useMemo(() => sumSessions(sessions), [sessions]);
   const dayAvg = useMemo(() => (sessions.length ? total / sessions.length : 0), [sessions, total]);
+
+  const markDirty = () => {
+    setIsDirty(true);
+    setStatusMessage("");
+  };
+
+  const onAdd = () => {
+    const minutes = Number(sessionInput);
+    if (!minutes || minutes <= 0 || !Number.isFinite(minutes)) return;
+    const rounded = Math.round(minutes);
+    setSessions((prev) => [...prev, rounded]);
+    setSessionInput("");
+    markDirty();
+  };
+
+  const onDelete = (idx: number) => {
+    setSessions((prev) => prev.filter((_, i) => i !== idx));
+    markDirty();
+  };
+
+  const onEdit = (idx: number, value: string) => {
+    const n = Number(value);
+    if (!n || n <= 0 || !Number.isFinite(n)) return;
+    const next = [...sessions];
+    next[idx] = Math.round(n);
+    setSessions(next);
+    markDirty();
+  };
+
+  const handleSave = async () => {
+    if (!selected) return;
+    setIsSaving(true);
+    setStatusMessage("");
+    try {
+      await setSessionsAction(selected, sessions);
+      await setDayMeta(selected, {
+        facilityName: facilityName || null,
+        conditionRating,
+        satisfactionRating,
+      });
+      const avg = await getOverallAverage();
+      setOverallAvg(avg);
+      setIsDirty(false);
+      setStatusMessage("保存しました");
+    } catch {
+      setStatusMessage("保存に失敗しました");
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   return (
     <div className="min-h-[100dvh] flex flex-col bg-black text-zinc-100">
@@ -133,22 +216,39 @@ export default function HistoryPage() {
         </section>
 
         {selected && (
-          <section className="mt-6 grid grid-cols-1 gap-2 rounded-xl bg-zinc-900/50 border border-zinc-800 p-4 text-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-zinc-300">施設名</span>
-              <span className="text-zinc-100">{facilityName || "-"}</span>
+          <section className="mt-6 space-y-3 rounded-xl bg-zinc-900/50 border border-zinc-800 p-4 text-sm">
+            <div>
+              <label className="block text-sm text-zinc-300 mb-1">施設名</label>
+              <input
+                type="text"
+                className="w-full bg-transparent text-zinc-100 placeholder:text-zinc-500 outline-none border-b border-zinc-700 focus:border-zinc-400"
+                placeholder="例: ○○サウナ"
+                value={facilityName}
+                onChange={(e) => {
+                  setFacilityName(e.target.value);
+                  markDirty();
+                }}
+              />
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-zinc-300">その日の体調</span>
-              <span className="text-yellow-400">
-                {Array.from({ length: 5 }, (_, i) => (conditionRating && i < conditionRating ? "★" : "☆")).join("")}
-              </span>
+              <span className="text-sm text-zinc-300">その日の体調</span>
+              <Stars
+                value={conditionRating}
+                onChange={(v) => {
+                  setConditionRating(v);
+                  markDirty();
+                }}
+              />
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-zinc-300">その日の満足度</span>
-              <span className="text-yellow-400">
-                {Array.from({ length: 5 }, (_, i) => (satisfactionRating && i < satisfactionRating ? "★" : "☆")).join("")}
-              </span>
+              <span className="text-sm text-zinc-300">その日の満足度</span>
+              <Stars
+                value={satisfactionRating}
+                onChange={(v) => {
+                  setSatisfactionRating(v);
+                  markDirty();
+                }}
+              />
             </div>
           </section>
         )}
@@ -165,11 +265,62 @@ export default function HistoryPage() {
                 className="flex items-center justify-between rounded-lg bg-zinc-900/70 border border-zinc-800 px-4 py-3"
               >
                 <div className="text-zinc-200 text-base">{i + 1}回目</div>
-                <div className="text-zinc-100">{m} 分</div>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    className="w-20 bg-transparent text-right text-zinc-100 outline-none border-b border-zinc-700 focus:border-zinc-400"
+                    value={String(m)}
+                    onChange={(e) => onEdit(i, e.target.value)}
+                    min={1}
+                  />
+                  <span className="text-zinc-400">分</span>
+                  <button
+                    aria-label="削除"
+                    onClick={() => onDelete(i)}
+                    className="text-zinc-400 hover:text-red-400 active:opacity-80"
+                  >
+                    ×
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
+          {selected && (
+            <div className="mt-4 flex items-center gap-3 bg-zinc-900/70 border border-zinc-800 rounded-xl p-3">
+              <input
+                type="number"
+                inputMode="numeric"
+                placeholder="何分?"
+                className="flex-1 bg-transparent text-zinc-100 placeholder:text-zinc-500 outline-none"
+                value={sessionInput}
+                onChange={(e) => setSessionInput(e.target.value)}
+                min={1}
+              />
+              <button
+                type="button"
+                onClick={onAdd}
+                className="px-4 py-2 rounded-lg bg-zinc-100 text-black font-semibold active:opacity-90 disabled:opacity-40"
+                disabled={!sessionInput}
+              >
+                追加
+              </button>
+            </div>
+          )}
         </section>
+        {selected && (
+          <section className="mt-8 mb-10">
+            <button
+              type="button"
+              onClick={() => void handleSave()}
+              className="w-full rounded-lg bg-zinc-100 text-black font-semibold py-3 active:opacity-90 disabled:opacity-40"
+              disabled={isSaving || !isDirty}
+            >
+              {isSaving ? "保存中..." : "保存"}
+            </button>
+      
+          </section>
+        )}
       </main>
 
       <nav

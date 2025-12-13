@@ -1,15 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  addSession,
-  getSessions,
-  removeSession,
-  setSessions,
-  sumSessions,
-  getOverallAverage,
-  setDayMeta,
-} from "@/lib/storage";
+import { useEffect, useMemo, useState } from "react";
+import { setSessions, sumSessions, getOverallAverage, setDayMeta } from "@/lib/storage";
 import type { DayMeta } from "@/lib/storage";
 
 type Props = {
@@ -47,12 +39,12 @@ export default function TodaySessions({ dateKey, initialSessions, initialOverall
   const [sessions, setLocalSessions] = useState<number[]>(initialSessions);
   const [input, setInput] = useState<string>("");
   const [overallAvg, setOverallAvg] = useState<number>(initialOverallAvg);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const metaTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const [facilityName, setFacilityName] = useState<string>(initialMeta?.facilityName ?? "");
   const [conditionRating, setConditionRating] = useState<number | null>(initialMeta?.conditionRating ?? null);
   const [satisfactionRating, setSatisfactionRating] = useState<number | null>(initialMeta?.satisfactionRating ?? null);
+  const [isDirty, setIsDirty] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string>("");
 
   useEffect(() => {
     setLocalSessions(initialSessions);
@@ -60,6 +52,8 @@ export default function TodaySessions({ dateKey, initialSessions, initialOverall
     setFacilityName(initialMeta?.facilityName ?? "");
     setConditionRating(initialMeta?.conditionRating ?? null);
     setSatisfactionRating(initialMeta?.satisfactionRating ?? null);
+    setIsDirty(false);
+    setStatusMessage("");
   }, [initialSessions, initialOverallAvg, initialMeta]);
 
   const total = useMemo(() => sumSessions(sessions), [sessions]);
@@ -69,24 +63,16 @@ export default function TodaySessions({ dateKey, initialSessions, initialOverall
     const minutes = Number(input);
     if (!minutes || minutes <= 0 || !Number.isFinite(minutes)) return;
     const rounded = Math.round(minutes);
-    // Optimistic update
     setLocalSessions((prev) => [...prev, rounded]);
     setInput("");
-    await addSession(dateKey, rounded, {
-      facilityName: facilityName || null,
-      conditionRating,
-      satisfactionRating,
-    });
-    const avg = await getOverallAverage();
-    setOverallAvg(avg);
+    setIsDirty(true);
+    setStatusMessage("");
   };
 
   const onDelete = async (idx: number) => {
-    // Optimistic update
     setLocalSessions((prev) => prev.filter((_, i) => i !== idx));
-    await removeSession(dateKey, idx);
-    const avg = await getOverallAverage();
-    setOverallAvg(avg);
+    setIsDirty(true);
+    setStatusMessage("");
   };
 
   const onReorderOrEdit = async (idx: number, value: string) => {
@@ -95,26 +81,29 @@ export default function TodaySessions({ dateKey, initialSessions, initialOverall
     const next = [...sessions];
     next[idx] = Math.round(n);
     setLocalSessions(next);
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async () => {
-      await setSessions(dateKey, next);
-      const avg = await getOverallAverage();
-      setOverallAvg(avg);
-    }, 500);
+    setIsDirty(true);
+    setStatusMessage("");
   };
 
-  const saveMeta = () => {
-    if (metaTimer.current) clearTimeout(metaTimer.current);
-    // セッションが1件以上あるときのみ即時保存（0件なら追加時に保存される）
-    metaTimer.current = setTimeout(async () => {
-      if (sessions.length > 0) {
-        await setDayMeta(dateKey, {
-          facilityName: facilityName || null,
-          conditionRating,
-          satisfactionRating,
-        });
-      }
-    }, 400);
+  const handleSave = async () => {
+    setIsSaving(true);
+    setStatusMessage("");
+    try {
+      await setSessions(dateKey, sessions);
+      await setDayMeta(dateKey, {
+        facilityName: facilityName || null,
+        conditionRating,
+        satisfactionRating,
+      });
+      const avg = await getOverallAverage();
+      setOverallAvg(avg);
+      setIsDirty(false);
+      setStatusMessage("保存しました");
+    } catch {
+      setStatusMessage("保存に失敗しました");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -129,7 +118,8 @@ export default function TodaySessions({ dateKey, initialSessions, initialOverall
             value={facilityName}
             onChange={(e) => {
               setFacilityName(e.target.value);
-              saveMeta();
+              setIsDirty(true);
+              setStatusMessage("");
             }}
           />
         </div>
@@ -139,7 +129,8 @@ export default function TodaySessions({ dateKey, initialSessions, initialOverall
             value={conditionRating}
             onChange={(v) => {
               setConditionRating(v);
-              saveMeta();
+              setIsDirty(true);
+              setStatusMessage("");
             }}
           />
         </div>
@@ -149,12 +140,13 @@ export default function TodaySessions({ dateKey, initialSessions, initialOverall
             value={satisfactionRating}
             onChange={(v) => {
               setSatisfactionRating(v);
-              saveMeta();
+              setIsDirty(true);
+              setStatusMessage("");
             }}
           />
         </div>
         {sessions.length === 0 && (
-          <div className="text-xs text-zinc-500">最初のセッション追加時に保存されます</div>
+          <div className="text-xs text-zinc-500">保存ボタンを押すと新しい記録が作成されます</div>
         )}
       </section>
       <section className="mt-2 text-center">
@@ -224,9 +216,17 @@ export default function TodaySessions({ dateKey, initialSessions, initialOverall
             追加
           </button>
         </div>
-        <div className="mt-2 text-xs text-zinc-500">
-          入力後「追加」で保存されます（自動保存）
-        </div>
+      
+      </section>
+      <section className="mt-6 mb-10">
+        <button
+          onClick={() => void handleSave()}
+          className="w-full rounded-lg bg-zinc-100 text-black font-semibold py-3 active:opacity-90 disabled:opacity-40"
+          disabled={isSaving || !isDirty}
+        >
+          {isSaving ? "保存中..." : "保存"}
+        </button>
+      
       </section>
     </>
   );
