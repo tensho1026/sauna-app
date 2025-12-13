@@ -55,7 +55,7 @@ export default function HistoryPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string>("");
 
-  // 初回: 記録がある日付一覧を取得
+  // 初回: 記録がある日付一覧を取得！
   useEffect(() => {
     (async () => {
       const [avg, facs] = await Promise.all([getOverallAverage(), listFacilities()]);
